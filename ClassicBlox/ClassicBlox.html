@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Rain-Blox Alpha 5.0 - Jump & Arrows</title>
+    <style>
+        body { margin: 0; background: #000; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
+        #login-screen {
+            position: absolute; inset: 0; background: #87CEEB; z-index: 1000;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+        }
+        .login-box { background: white; padding: 40px; border: 4px solid #555; border-radius: 8px; text-align: center; }
+        #gui { position: absolute; inset: 0; pointer-events: none; display: none; }
+        #chat-container {
+            position: absolute; top: 10px; left: 10px; width: 320px; height: 220px;
+            background: rgba(0,0,0,0.4); border-radius: 5px; pointer-events: auto;
+            display: flex; flex-direction: column;
+        }
+        #chat-messages { flex: 1; padding: 10px; color: white; overflow-y: auto; font-size: 14px; text-shadow: 1px 1px #000; }
+        #chat-input { width: 90%; margin: 5px auto; background: rgba(255,255,255,0.2); border: 1px solid #fff; padding: 5px; color: white; outline: none; display: none; }
+        #blocks-btn { position: absolute; bottom: 20px; left: 20px; pointer-events: auto; padding: 15px 30px; background: #333; color: white; border: 2px solid #fff; cursor: pointer; }
+        #palette { position: absolute; bottom: 80px; left: 20px; background: #222; padding: 10px; display: none; flex-direction: column; gap: 5px; pointer-events: auto; }
+        .color-opt { width: 120px; height: 30px; border: 1px solid #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 12px; color: white; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
+</head>
+<body>
+
+<div id="login-screen">
+    <div class="login-box">
+        <h2>RAIN-BLOX Alpha 5.0</h2>
+        <input type="text" id="username-input" placeholder="Username..." style="padding:10px; width:200px;"><br><br>
+        <button onclick="startGame()" style="padding:10px 40px; cursor:pointer; background:#0066ff; color:white; border:none; font-weight:bold;">PLAY</button>
+    </div>
+</div>
+
+<div id="gui">
+    <div id="chat-container">
+        <div id="chat-messages">System: Use Arrows to move, Space to jump!</div>
+        <input type="text" id="chat-input" maxlength="50">
+    </div>
+    <div id="palette">
+        <div class="color-opt" style="background:#ff0000" onclick="setBlock(0xff0000)">Red</div>
+        <div class="color-opt" style="background:#00aa00" onclick="setBlock(0x00aa00)">Green</div>
+        <div class="color-opt" style="background:#5e3a1a" onclick="setBlock(0x5e3a1a)">Brown</div>
+        <div class="color-opt" style="background:#0000ff" onclick="setBlock(0x0000ff)">Blue</div>
+        <div class="color-opt" style="background:#ffcc00; color:black" onclick="setBlock(0xffcc00)">Yellow</div>
+    </div>
+    <button id="blocks-btn" onclick="togglePalette()">BLOCKS</button>
+</div>
+
+<script>
+    let scene, camera, renderer, player, clock, raycaster, mouse;
+    let keys = {}, lArm, rArm, lLeg, rLeg;
+    let activeColor = 0xff0000;
+    let username = "Guest";
+    let isChatting = false;
+
+    // Physics variables
+    let verticalVelocity = 0;
+    const gravity = -0.015;
+    const jumpForce = 0.45;
+    let isJumping = false;
+
+    function startGame() {
+        username = document.getElementById('username-input').value.trim() || "Guest";
+        document.getElementById('login-screen').style.display = 'none';
+        document.getElementById('gui').style.display = 'block';
+        init();
+    }
+
+    function togglePalette() {
+        const p = document.getElementById('palette');
+        p.style.display = p.style.display === 'flex' ? 'none' : 'flex';
+    }
+
+    function setBlock(color) { activeColor = color; togglePalette(); }
+
+    function init() {
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB);
+        camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+        const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+        sun.position.set(50, 100, 50);
+        scene.add(sun);
+
+        const baseplate = new THREE.Mesh(new THREE.BoxGeometry(200, 1, 200), new THREE.MeshPhongMaterial({ color: 0x3A5F0B }));
+        baseplate.position.y = -0.5;
+        scene.add(baseplate);
+
+        player = new THREE.Group();
+        const torso = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 1), new THREE.MeshPhongMaterial({color: 0x0066ff}));
+        torso.position.y = 2;
+        const head = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.2, 1.2), new THREE.MeshPhongMaterial({color: 0xffdbac}));
+        head.position.y = 3.6;
+        player.add(torso, head);
+
+        const armGeo = new THREE.BoxGeometry(0.8, 2, 0.8);
+        lArm = new THREE.Mesh(armGeo, new THREE.MeshPhongMaterial({color: 0x0066ff})); lArm.position.set(-1.4, 2, 0);
+        rArm = new THREE.Mesh(armGeo, new THREE.MeshPhongMaterial({color: 0x0066ff})); rArm.position.set(1.4, 2, 0);
+        player.add(lArm, rArm);
+
+        const legGeo = new THREE.BoxGeometry(1, 2, 1);
+        lLeg = new THREE.Mesh(legGeo, new THREE.MeshPhongMaterial({color: 0x111111})); lLeg.position.set(-0.5, 1, 0);
+        rLeg = new THREE.Mesh(legGeo, new THREE.MeshPhongMaterial({color: 0x111111})); rLeg.position.set(0.5, 1, 0);
+        player.add(lLeg, rLeg);
+
+        scene.add(player);
+        raycaster = new THREE.Raycaster();
+        mouse = new THREE.Vector2();
+        clock = new THREE.Clock();
+
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Enter') {
+                const input = document.getElementById('chat-input');
+                if (!isChatting) {
+                    isChatting = true;
+                    input.style.display = 'block';
+                    input.focus();
+                    keys = {}; 
+                } else {
+                    if (input.value.trim() !== "") {
+                        document.getElementById('chat-messages').innerHTML += `<div><b>${username}:</b> ${input.value}</div>`;
+                    }
+                    input.value = "";
+                    input.style.display = 'none';
+                    isChatting = false;
+                }
+            }
+            if (!isChatting) keys[e.code] = true;
+        });
+
+        window.addEventListener('keyup', (e) => keys[e.code] = false);
+        window.addEventListener('mousedown', onSpawn);
+        animate();
+    }
+
+    function onSpawn(event) {
+        if (isChatting || event.target.tagName === 'BUTTON' || event.target.className === 'color-opt') return;
+        mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObjects(scene.children, true);
+        if (intersects.length > 0) {
+            const brick = new THREE.Mesh(new THREE.BoxGeometry(4, 1.2, 2), new THREE.MeshPhongMaterial({ color: activeColor }));
+            brick.position.copy(intersects[0].point);
+            brick.position.y += 0.6;
+            scene.add(brick);
+        }
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        const delta = clock.getDelta();
+        const time = Date.now() * 0.01;
+
+        if (player) {
+            const moveSpeed = 15 * delta;
+            const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), player.rotation.y);
+            let moving = false;
+
+            if (!isChatting) {
+                // ARROW KEY MOVEMENT
+                if (keys['ArrowUp']) { player.position.addScaledVector(forward, moveSpeed); moving = true; }
+                if (keys['ArrowDown']) { player.position.addScaledVector(forward, -moveSpeed); moving = true; }
+                if (keys['ArrowLeft']) player.rotation.y += 0.05;
+                if (keys['ArrowRight']) player.rotation.y -= 0.05;
+
+                // JUMP LOGIC
+                if (keys['Space'] && !isJumping) {
+                    verticalVelocity = jumpForce;
+                    isJumping = true;
+                }
+            }
+
+            // Apply Gravity
+            player.position.y += verticalVelocity;
+            if (player.position.y > 0) {
+                verticalVelocity += gravity;
+            } else {
+                player.position.y = 0;
+                verticalVelocity = 0;
+                isJumping = false;
+            }
+
+            if (moving && !isJumping) {
+                const s = Math.sin(time) * 0.5;
+                lArm.rotation.x = -s; rArm.rotation.x = s;
+                lLeg.rotation.x = s; rLeg.rotation.x = -s;
+            } else if (!isJumping) {
+                lArm.rotation.x = rArm.rotation.x = lLeg.rotation.x = rLeg.rotation.x = 0;
+            }
+
+            const camOffset = new THREE.Vector3(0, 10, 18).applyAxisAngle(new THREE.Vector3(0, 1, 0), player.rotation.y);
+            camera.position.copy(player.position).add(camOffset);
+            camera.lookAt(player.position.x, player.position.y + 2, player.position.z);
+        }
+        renderer.render(scene, camera);
+    }
+</script>
+</body>
+</html>
